@@ -1,6 +1,8 @@
 # mini_bitcask: A Starting Point for Distributed Data Storage
 [中文版](./readme-zh.md)
 > For personal learning and exploration  
+
+
 `mini_bitcask` is a simplified implementation of the Bitcask key-value storage model, focusing on efficient data storage and retrieval in single-node environments. This project serves as a foundation for deeper research into distributed storage systems, making it an excellent starting point for learning and practical experimentation.
 
 ## Current Objectives
