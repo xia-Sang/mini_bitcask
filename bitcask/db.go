@@ -125,6 +125,45 @@ func (db *Db) loadWalByIds() error {
 
 	return nil
 }
+func (db *Db) Fold(fn func(key, value []byte) bool) error {
+	// 加锁，确保并发安全
+	// db.dbMu.RLock()
+	// defer db.dbMu.RUnlock()
+
+	// Step 1: 遍历 memtable 中的数据
+	errOccurred := false
+	db.memtable.Fold(func(key []byte, pos *Pos) bool {
+		// 从 WAL 中读取记录
+		var wal *WAL
+		if db.newWal.Fid == pos.Fid {
+			wal = db.newWal
+		} else {
+			if v, ok := db.olderWal[pos.Fid]; ok {
+				wal = v
+			} else {
+				panic("存在错误！！")
+			}
+		}
+		record, err := wal.readRecord(pos.Offset, pos.Length)
+		if err != nil {
+			errOccurred = true
+			fmt.Printf("error reading record from WAL Fid %d: %v\n", pos.Fid, err)
+			return false
+		}
+
+		// 调用回调函数
+		if !fn(key, record.Value) {
+			return false // 中断遍历
+		}
+		return true // 继续遍历
+	})
+
+	if errOccurred {
+		return fmt.Errorf("errors occurred during Fold")
+	}
+
+	return nil
+}
 
 // 刷新wal配置
 func (db *Db) freshWal() error {

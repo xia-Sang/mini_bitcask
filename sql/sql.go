@@ -13,6 +13,7 @@ type KVStore interface {
 	Put(key []byte, value []byte) error
 	Get(key []byte) ([]byte, error)
 	Delete(key []byte) error
+	Fold(func(key, value []byte) bool) error
 }
 
 type RDBMS struct {
