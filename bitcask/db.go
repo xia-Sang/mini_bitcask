@@ -161,7 +161,6 @@ func (db *Db) Fold(fn func(key, value []byte) bool) error {
 	if errOccurred {
 		return fmt.Errorf("errors occurred during Fold")
 	}
-
 	return nil
 }
 
@@ -374,7 +373,3 @@ func (db *Db) Flush() error {
 
 	return nil // Flush 成功
 }
-
-// func (db *Db) List() error {
-
-// }

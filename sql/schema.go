@@ -15,6 +15,8 @@ type Field struct {
 
 // 表结构定义
 type TableSchema struct {
-	Name   string
-	Fields []Field
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+	Indexes []string `json:"indexes"`
+	//todo: 需要添加约束函数
 }
