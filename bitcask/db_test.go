@@ -1,6 +1,7 @@
 package bitcask
 
 import (
+	"bitcask/conf"
 	"bitcask/utils"
 	"testing"
 
@@ -8,7 +9,7 @@ import (
 )
 
 func TestDB(t *testing.T) {
-	db, err := NewDb(DefaultConfig())
+	db, err := NewDb(conf.DefaultConfig())
 	assert.Nil(t, err)
 
 	for i := range 400 {
@@ -24,7 +25,7 @@ func TestDB(t *testing.T) {
 	// }
 }
 func TestDB1(t *testing.T) {
-	db, err := NewDb(DefaultConfig())
+	db, err := NewDb(conf.DefaultConfig())
 	assert.Nil(t, err)
 	t.Log(db)
 
@@ -36,7 +37,7 @@ func TestDB1(t *testing.T) {
 	}
 }
 func TestDB2(t *testing.T) {
-	db, err := NewDb(DefaultConfig())
+	db, err := NewDb(conf.DefaultConfig())
 	assert.Nil(t, err)
 	t.Log(db)
 

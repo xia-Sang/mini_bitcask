@@ -1,6 +1,7 @@
 package bitcask
 
 import (
+	"bitcask/conf"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 
 // Db represents the database structure.
 type Db struct {
-	conf     *Config         // Configuration for the database
+	conf     *conf.Config    // Configuration for the database
 	dbMu     sync.RWMutex    // Lock for safe concurrent access
 	memtable *Memtable       // In-memory indexing table
 	olderWal map[uint32]*WAL // Map of older WAL files
@@ -160,19 +161,9 @@ func (db *Db) freshWal() error {
 	db.newWal = newWal
 	return nil
 }
-func checkDirPath(dirPath string) error {
-	// 存在就不创建 不存在就创建 可能多级目录
-	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-		if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
-			return err
-		}
-		return nil
-	}
-	return nil
-}
 
 // NewDb creates a new database instance.
-func NewDb(conf *Config) (*Db, error) {
+func NewDb(conf *conf.Config) (*Db, error) {
 	// Step 1: Validate the configuration.
 	if err := conf.Validate(); err != nil {
 		return nil, fmt.Errorf("failed to use config: %w", err)
@@ -283,6 +274,7 @@ func (db *Db) Get(key []byte) ([]byte, error) {
 	return nil, fmt.Errorf("key not found: %s", string(key))
 }
 
+// 进行flush数据刷新
 func (db *Db) Flush() error {
 	// Step 1: 刷新当前 WAL
 	if err := db.freshWal(); err != nil {
@@ -343,3 +335,7 @@ func (db *Db) Flush() error {
 
 	return nil // Flush 成功
 }
+
+// func (db *Db) List() error {
+
+// }

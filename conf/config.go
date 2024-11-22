@@ -1,6 +1,9 @@
-package bitcask
+package conf
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 // Config holds the configuration for the storage system.
 type Config struct {
@@ -62,4 +65,14 @@ func DefaultConfig() *Config {
 		KeyValueMaxSize: 1024,     // Default max key-value size (1 KB)
 		FidMaxSize:      64,       // Default max file ID size (64 bytes)
 	}
+}
+func checkDirPath(dirPath string) error {
+	// 存在就不创建 不存在就创建 可能多级目录
+	if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+		if err := os.MkdirAll(dirPath, os.ModePerm); err != nil {
+			return err
+		}
+		return nil
+	}
+	return nil
 }
