@@ -4,6 +4,9 @@ import (
 	"bitcask/bitcask"
 	"bitcask/conf"
 	"bitcask/utils"
+	"errors"
+	"fmt"
+	"sync"
 )
 
 type KVStore interface {
@@ -13,7 +16,9 @@ type KVStore interface {
 }
 
 type RDBMS struct {
-	Store KVStore // Bitcask 底层存储
+	Store  KVStore                 // Bitcask 底层存储
+	Tables map[string]*TableSchema // 表定义存储
+	mu     sync.RWMutex            //并发操作
 }
 
 func NewRDBMS() (*RDBMS, error) {
@@ -22,9 +27,52 @@ func NewRDBMS() (*RDBMS, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &RDBMS{db}, nil
+	return &RDBMS{Store: db, Tables: make(map[string]*TableSchema)}, nil
+}
+
+// 创建表
+func (db *RDBMS) CreateTable(name string, fields []Field) error {
+	if _, exists := db.Tables[name]; exists {
+		return fmt.Errorf("table %s already exists", name)
+	}
+	db.Tables[name] = &TableSchema{
+		Name:   name,
+		Fields: fields,
+	}
+	return nil
+}
+
+// 验证字段
+func (db *RDBMS) validateFields(tableName string, data map[string][]byte) error {
+	table, exists := db.Tables[tableName]
+	if !exists {
+		return fmt.Errorf("table %s does not exist", tableName)
+	}
+
+	fieldMap := make(map[string]string)
+	for _, field := range table.Fields {
+		fieldMap[field.Name] = field.Type
+	}
+
+	// 检查字段是否有效
+	for key, value := range data {
+		expectedType, exists := fieldMap[key]
+		if !exists {
+			return fmt.Errorf("invalid field: %s", key)
+		}
+
+		// 可扩展类型验证，目前仅检查存在性
+		if expectedType == FieldTypeInt && len(value) == 0 {
+			return errors.New("int field cannot be empty")
+		}
+	}
+	return nil
 }
 func (db *RDBMS) Insert(tableName string, primaryKey []byte, rowData map[string][]byte) error {
+	// 验证字段
+	if err := db.validateFields(tableName, rowData); err != nil {
+		return err
+	}
 	// 1. 序列化行数据
 	serializedData, err := utils.SerializeRow(rowData)
 	if err != nil {
@@ -50,6 +98,7 @@ func (db *RDBMS) Insert(tableName string, primaryKey []byte, rowData map[string]
 	return nil
 }
 func (db *RDBMS) QueryByPrimaryKey(tableName string, primaryKey []byte) (map[string][]byte, error) {
+
 	// 构造主键键
 	key := append([]byte(tableName+":"), primaryKey...)
 	value, err := db.Store.Get(key)
@@ -82,6 +131,10 @@ func (db *RDBMS) QueryByCondition(tableName, column string, value []byte) ([]map
 	return results, nil
 }
 func (db *RDBMS) Update(tableName string, primaryKey []byte, updates map[string][]byte) error {
+	// 验证字段
+	if err := db.validateFields(tableName, updates); err != nil {
+		return err
+	}
 	// 1. 获取旧记录
 	oldData, err := db.QueryByPrimaryKey(tableName, primaryKey)
 	if err != nil {
