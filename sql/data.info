@@ -1,1 +1,0 @@
-{"orders":{"name":"orders","columns":["order_id","user_id","amount"],"indexes":[]},"users":{"name":"users","columns":["id","name","email"],"indexes":[]}}

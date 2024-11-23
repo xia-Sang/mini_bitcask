@@ -19,7 +19,7 @@ func (db *RDBMS) View(tableName string) error {
 		return fmt.Errorf("table %s does not exist", tableName)
 	}
 
-	// Fetch all key-value pairs for the specified table
+	// Fetch all rows for the specified table
 	prefix := []byte(tableName + ":")
 	rows, err := db.GetKeyValuesWithPrefix(prefix)
 	if err != nil {
@@ -27,7 +27,10 @@ func (db *RDBMS) View(tableName string) error {
 	}
 
 	// Prepare table headers from the schema
-	headers := table.Columns
+	headers := make([]string, 0, len(table.Columns))
+	for col := range table.Columns {
+		headers = append(headers, col)
+	}
 
 	// Use a bytes.Buffer to construct the tabular output
 	var buffer bytes.Buffer

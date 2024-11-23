@@ -38,7 +38,7 @@ func NewRDBMS() (*RDBMS, error) {
 }
 
 // CreateTable creates a table schema with the specified columns.
-func (db *RDBMS) CreateTable(name string, columns []string) error {
+func (db *RDBMS) CreateTable(name string, columns map[string]FieldType) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -53,47 +53,28 @@ func (db *RDBMS) CreateTable(name string, columns []string) error {
 	return nil
 }
 
-// validateFields validates the fields in the input data against the table's column definitions.
-func (db *RDBMS) validateFields(tableName string, data map[string][]byte) error {
-	db.mu.RLock()
-	defer db.mu.RUnlock()
-
-	table, exists := db.Tables[tableName]
-	if !exists {
-		return fmt.Errorf("table %s does not exist", tableName)
-	}
-
-	// Create a set of valid column names for fast lookup
-	validColumns := make(map[string]struct{})
-	for _, column := range table.Columns {
-		validColumns[column] = struct{}{}
-	}
-
-	// Check each key in the input data
-	for field := range data {
-		if _, ok := validColumns[field]; !ok {
-			return fmt.Errorf("invalid field: %s", field)
-		}
-	}
-	return nil
-}
-
 // Insert adds a new row to the specified table.
 func (db *RDBMS) Insert(tableName string, primaryKey []byte, rowData map[string][]byte) error {
-	// Validate fields
+	// Validate the input data against the table schema
 	if err := db.validateFields(tableName, rowData); err != nil {
-		return err
+		return fmt.Errorf("field validation failed: %v", err)
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	// Serialize row data
+
+	// Check if the primary key already exists
+	key := append([]byte(tableName+":"), primaryKey...)
+	if _, err := db.Store.Get(key); err == nil {
+		return fmt.Errorf("primary key already exists: %s", primaryKey)
+	}
+
+	// Serialize the row data for storage
 	serializedData, err := utils.SerializeRow(rowData)
 	if err != nil {
 		return fmt.Errorf("failed to serialize row data: %v", err)
 	}
 
-	// Construct key and store data
-	key := append([]byte(tableName+":"), primaryKey...)
+	// Store the serialized row in the database
 	if err := db.Store.Put(key, serializedData); err != nil {
 		return fmt.Errorf("failed to store row: %v", err)
 	}
@@ -101,87 +82,193 @@ func (db *RDBMS) Insert(tableName string, primaryKey []byte, rowData map[string]
 	// Update indexes
 	for column, value := range rowData {
 		indexKey := append([]byte("index:"+tableName+":"+column+":"), value...)
-		existing, _ := db.Store.Get(indexKey)
-		updatedIndex := append(existing, primaryKey...)
-		if err := db.Store.Put(indexKey, updatedIndex); err != nil {
-			return fmt.Errorf("failed to update index: %v", err)
+		existingKeys, _ := db.Store.Get(indexKey)
+
+		// Append the primary key to the index
+		updatedKeys := append(existingKeys, primaryKey...)
+		if err := db.Store.Put(indexKey, updatedKeys); err != nil {
+			return fmt.Errorf("failed to update index for column %s: %v", column, err)
 		}
 	}
+
 	return nil
 }
 
-// Update modifies a row in the specified table.
+// Update modifies a row in the specified table based on its primary key.
 func (db *RDBMS) Update(tableName string, primaryKey []byte, updates map[string][]byte) error {
-
-	// Validate fields
-	if err := db.validateFields(tableName, updates); err != nil {
-		return err
+	// Validate that the table exists
+	table, exists := db.Tables[tableName]
+	if !exists {
+		return fmt.Errorf("table %s does not exist", tableName)
 	}
 
-	// Fetch existing data
+	// Fetch the existing row
 	oldData, err := db.QueryByPrimaryKey(tableName, primaryKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to fetch existing row for primary key %s: %v", primaryKey, err)
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
-	// Remove old indexes
-	for column, value := range oldData {
-		indexKey := append([]byte("index:"+tableName+":"+column+":"), value...)
-		if err := db.Store.Delete(indexKey); err != nil {
-			return fmt.Errorf("failed to delete old index: %v", err)
+	// Validate update fields and types
+	for columnName, newValue := range updates {
+		// Check if the column exists in the schema
+		columnType, ok := table.Columns[columnName]
+		if !ok {
+			return fmt.Errorf("invalid column: %s for table %s", columnName, tableName)
+		}
+
+		// Validate the type of the new value
+		if err := validateFieldType(columnType, newValue); err != nil {
+			return fmt.Errorf("invalid value for column %s: %v", columnName, err)
 		}
 	}
 
-	// Apply updates
-	for k, v := range updates {
-		oldData[k] = v
+	// Remove old indexes for the updated fields
+	for columnName := range updates {
+		if oldValue, ok := oldData[columnName]; ok {
+			indexKey := append([]byte("index:"+tableName+":"+columnName+":"), oldValue...)
+			if err := db.Store.Delete(indexKey); err != nil {
+				return fmt.Errorf("failed to delete old index for column %s: %v", columnName, err)
+			}
+		}
 	}
 
-	// Serialize and store updated data
-	newSerializedData, err := utils.SerializeRow(oldData)
+	// Apply the updates to the row
+	for columnName, newValue := range updates {
+		oldData[columnName] = newValue
+	}
+
+	// Serialize and store the updated row
+	serializedData, err := utils.SerializeRow(oldData)
 	if err != nil {
 		return fmt.Errorf("failed to serialize updated row: %v", err)
 	}
+
 	key := append([]byte(tableName+":"), primaryKey...)
-	if err := db.Store.Put(key, newSerializedData); err != nil {
+	if err := db.Store.Put(key, serializedData); err != nil {
 		return fmt.Errorf("failed to update row: %v", err)
 	}
 
-	// Add new indexes
-	for column, value := range oldData {
-		indexKey := append([]byte("index:"+tableName+":"+column+":"), value...)
-		if err := db.Store.Put(indexKey, primaryKey); err != nil {
-			return fmt.Errorf("failed to update new index: %v", err)
+	// Add new indexes for the updated fields
+	for columnName, newValue := range updates {
+		indexKey := append([]byte("index:"+tableName+":"+columnName+":"), newValue...)
+		existingKeys, _ := db.Store.Get(indexKey)
+
+		// Append the primary key to the index
+		updatedKeys := append(existingKeys, primaryKey...)
+		if err := db.Store.Put(indexKey, updatedKeys); err != nil {
+			return fmt.Errorf("failed to update index for column %s: %v", columnName, err)
 		}
 	}
+
 	return nil
 }
 
-// Delete removes a row from the specified table and its associated indexes.
-func (db *RDBMS) Delete(tableName string, primaryKey []byte) error {
+// validateFields checks that the provided data matches the schema of the table.
+func (db *RDBMS) validateFields(tableName string, data map[string][]byte) error {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
 
-	// Fetch row data
-	row, err := db.QueryByPrimaryKey(tableName, primaryKey)
-	if err != nil {
-		return err
+	// Check if the table exists
+	table, exists := db.Tables[tableName]
+	if !exists {
+		return fmt.Errorf("table %s does not exist", tableName)
 	}
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	// Remove indexes
-	for column, value := range row {
-		indexKey := append([]byte("index:"+tableName+":"+column+":"), value...)
-		if err := db.Store.Delete(indexKey); err != nil {
-			return fmt.Errorf("failed to delete index: %v", err)
+
+	// Create a map of column definitions for fast lookup
+	columnDefinitions := make(map[string]FieldType)
+	for col, fieldType := range table.Columns {
+		columnDefinitions[col] = fieldType
+	}
+
+	// Validate each field in the input data
+	for fieldName, fieldValue := range data {
+		// Check if the field exists in the schema
+		fieldType, ok := columnDefinitions[fieldName]
+		if !ok {
+			return fmt.Errorf("invalid field: %s in table %s", fieldName, tableName)
+		}
+
+		// Validate the field value against its type
+		if err := validateFieldType(fieldType, fieldValue); err != nil {
+			return fmt.Errorf("validation failed for field '%s': %v", fieldName, err)
 		}
 	}
 
-	// Remove primary key record
-	key := append([]byte(tableName+":"), primaryKey...)
-	if err := db.Store.Delete(key); err != nil {
-		return fmt.Errorf("failed to delete row: %v", err)
+	// Check for missing required fields (optional)
+	for fieldName := range columnDefinitions {
+		if _, exists := data[fieldName]; !exists {
+			return fmt.Errorf("missing required field: %s in table %s", fieldName, tableName)
+		}
 	}
+
 	return nil
+}
+
+// Select retrieves rows from the specified table where the given column matches the specified value.
+// It supports selecting specific columns or all columns (denoted by "*").
+func (db *RDBMS) Select(tableName string, columns []string, conditionColumn string, value []byte) ([]map[string][]byte, error) {
+	db.mu.RLock()
+
+	// Check if the table exists
+	table, exists := db.Tables[tableName]
+	if !exists {
+		db.mu.RUnlock()
+		return nil, fmt.Errorf("table %s does not exist", tableName)
+	}
+
+	// If columns are "*", select all columns
+	if len(columns) == 1 && columns[0] == "*" {
+		columns = make([]string, 0, len(table.Columns))
+		for col := range table.Columns {
+			columns = append(columns, col)
+		}
+	}
+
+	// Validate columns, including the condition column
+	columnSet := make(map[string]struct{})
+	for col := range table.Columns {
+		columnSet[col] = struct{}{}
+	}
+
+	for _, col := range append(columns, conditionColumn) {
+		if _, ok := columnSet[col]; !ok {
+			return nil, fmt.Errorf("column %s does not exist in table %s", col, tableName)
+		}
+	}
+
+	// Query the index for matching primary keys
+	indexPrefix := append([]byte("index:"+tableName+":"+conditionColumn+":"), value...)
+	primaryKeys, err := db.Store.Get(indexPrefix)
+	if err != nil || len(primaryKeys) == 0 {
+		db.mu.RUnlock()
+		return nil, fmt.Errorf("no matching rows found for condition column %s in table %s", conditionColumn, tableName)
+	}
+
+	// Fetch rows based on the primary keys
+	var results []map[string][]byte
+	primaryKeySize := len(primaryKeys) / len(value) // Determine primary key size
+
+	db.mu.RUnlock()
+	for i := 0; i < len(primaryKeys); i += primaryKeySize {
+		primaryKey := primaryKeys[i : i+primaryKeySize]
+		row, err := db.QueryByPrimaryKey(tableName, primaryKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query row for primary key %s: %v", primaryKey, err)
+		}
+
+		// Filter the row to include only the requested columns
+		selectedRow := make(map[string][]byte)
+		for _, col := range columns {
+			if val, ok := row[col]; ok {
+				selectedRow[col] = val
+			}
+		}
+
+		results = append(results, selectedRow)
+	}
+
+	return results, nil
 }
 
 // QueryByPrimaryKey retrieves a row by its primary key from the specified table.
@@ -210,7 +297,7 @@ func (db *RDBMS) QueryByPrimaryKey(tableName string, primaryKey []byte) (map[str
 
 	// Validate the result against the table's column definitions
 	for column := range rowData {
-		if !columnExists(column, table.Columns) {
+		if _, ok := table.Columns[column]; !ok {
 			return nil, fmt.Errorf("unexpected column '%s' found in row data", column)
 		}
 	}
@@ -218,127 +305,17 @@ func (db *RDBMS) QueryByPrimaryKey(tableName string, primaryKey []byte) (map[str
 	return rowData, nil
 }
 
-// Helper function to check if a column exists in the table schema
-func columnExists(column string, columns []string) bool {
-	for _, col := range columns {
-		if col == column {
-			return true
-		}
-	}
-	return false
-}
-func (db *RDBMS) Close() error {
-	return WriteToFile("data.info", db.Tables)
-}
-
-// Select retrieves rows from the specified table where the given column matches the specified value.
-// It supports selecting specific columns or all columns (denoted by "*").
-func (db *RDBMS) Select(tableName string, columns []string, conditionColumn string, value []byte) ([]map[string][]byte, error) {
-	db.mu.RLock()
-	defer db.mu.RUnlock()
-
-	// Check if the table exists
-	table, exists := db.Tables[tableName]
-	if !exists {
-		return nil, fmt.Errorf("table %s does not exist", tableName)
-	}
-
-	// If columns are "*", select all columns
-	if len(columns) == 1 && columns[0] == "*" {
-		columns = table.Columns
-	}
-
-	// Validate selected columns
-	columnSet := make(map[string]struct{})
-	for _, col := range table.Columns {
-		columnSet[col] = struct{}{}
-	}
-
-	for _, col := range columns {
-		if _, ok := columnSet[col]; !ok {
-			return nil, fmt.Errorf("column %s does not exist in table %s", col, tableName)
-		}
-	}
-
-	// Validate the condition column
-	if _, ok := columnSet[conditionColumn]; !ok {
-		return nil, fmt.Errorf("condition column %s does not exist in table %s", conditionColumn, tableName)
-	}
-
-	// Query the index for matching primary keys
-	indexPrefix := append([]byte("index:"+tableName+":"+conditionColumn+":"), value...)
-	primaryKeys, err := db.Store.Get(indexPrefix)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get index for column %s in table %s: %v", conditionColumn, tableName, err)
-	}
-
-	// Fetch rows based on the primary keys
-	var results []map[string][]byte
-	primaryKeyLength := len(primaryKeys) / len(value) // Approximate primary key length
-	if primaryKeyLength == 0 {
-		return nil, nil // No matching rows
-	}
-
-	for i := 0; i < len(primaryKeys); i += primaryKeyLength {
-		primaryKey := primaryKeys[i : i+primaryKeyLength]
-		row, err := db.QueryByPrimaryKey(tableName, primaryKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query row for primary key %s: %v", primaryKey, err)
-		}
-
-		// Filter the row to include only the requested columns
-		selectedRow := make(map[string][]byte)
-		for _, col := range columns {
-			if val, ok := row[col]; ok {
-				selectedRow[col] = val
-			}
-		}
-
-		results = append(results, selectedRow)
-	}
-
-	return results, nil
-}
-
-// Select retrieves rows from the specified table where the given column matches the specified value.
-// It supports selecting specific columns or all columns (denoted by "*") and directly displays the formatted output.
+// SelectAndDisplay retrieves rows from the specified table, matches the condition, and displays formatted output.
 func (db *RDBMS) SelectAndDisplay(tableName string, columns []string, conditionColumn string, value []byte) error {
-	db.mu.RLock()
-	defer db.mu.RUnlock()
-
-	// Check if the table exists
-	table, exists := db.Tables[tableName]
-	if !exists {
-		return fmt.Errorf("table %s does not exist", tableName)
-	}
-
-	// If columns are "*", select all columns
-	if len(columns) == 1 && columns[0] == "*" {
-		columns = table.Columns
-	}
-
-	// Validate selected columns
-	columnSet := make(map[string]struct{})
-	for _, col := range table.Columns {
-		columnSet[col] = struct{}{}
-	}
-
-	for _, col := range columns {
-		if _, ok := columnSet[col]; !ok {
-			return fmt.Errorf("column %s does not exist in table %s", col, tableName)
-		}
-	}
-
-	// Validate the condition column
-	if _, ok := columnSet[conditionColumn]; !ok {
-		return fmt.Errorf("condition column %s does not exist in table %s", conditionColumn, tableName)
-	}
-
-	// Query the index for matching primary keys
-	indexPrefix := append([]byte("index:"+tableName+":"+conditionColumn+":"), value...)
-	primaryKeys, err := db.Store.Get(indexPrefix)
+	// Reuse Select logic
+	results, err := db.Select(tableName, columns, conditionColumn, value)
 	if err != nil {
-		return fmt.Errorf("failed to get index for column %s in table %s: %v", conditionColumn, tableName, err)
+		return err
+	}
+
+	if len(results) == 0 {
+		fmt.Println("No results found.")
+		return nil
 	}
 
 	// Set up a tab writer for output
@@ -348,28 +325,11 @@ func (db *RDBMS) SelectAndDisplay(tableName string, columns []string, conditionC
 	// Write column headers
 	fmt.Fprintln(writer, strings.Join(columns, "\t"))
 
-	// Fetch rows based on the primary keys and write them incrementally
-	primaryKeyLength := len(primaryKeys) / len(value) // Approximate primary key length
-	if primaryKeyLength == 0 {
-		fmt.Println("No results found.")
-		return nil
-	}
-	fmt.Println("Results found:")
-	for i := 0; i < len(primaryKeys); i += primaryKeyLength {
-		primaryKey := primaryKeys[i : i+primaryKeyLength]
-		row, err := db.QueryByPrimaryKey(tableName, primaryKey)
-		if err != nil {
-			return fmt.Errorf("failed to query row for primary key %s: %v", primaryKey, err)
-		}
-
-		// Format and write the row to the writer
+	// Write rows
+	for _, row := range results {
 		var line []string
 		for _, col := range columns {
-			if val, ok := row[col]; ok {
-				line = append(line, string(val))
-			} else {
-				line = append(line, "") // Handle missing columns
-			}
+			line = append(line, string(row[col])) // Convert []byte to string
 		}
 		fmt.Fprintln(writer, strings.Join(line, "\t"))
 	}
@@ -378,4 +338,36 @@ func (db *RDBMS) SelectAndDisplay(tableName string, columns []string, conditionC
 	writer.Flush()
 	fmt.Println(buffer.String())
 	return nil
+}
+
+// Delete removes a row from the specified table and its associated indexes.
+func (db *RDBMS) Delete(tableName string, primaryKey []byte) error {
+
+	// Fetch row data
+	row, err := db.QueryByPrimaryKey(tableName, primaryKey)
+	if err != nil {
+		db.mu.Unlock()
+		return fmt.Errorf("failed to fetch row for deletion: %v", err)
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	// Remove indexes
+	for column, value := range row {
+		indexKey := append([]byte("index:"+tableName+":"+column+":"), value...)
+		if err := db.Store.Delete(indexKey); err != nil {
+			return fmt.Errorf("failed to delete index for column %s: %v", column, err)
+		}
+	}
+
+	// Remove primary key record
+	key := append([]byte(tableName+":"), primaryKey...)
+	if err := db.Store.Delete(key); err != nil {
+		return fmt.Errorf("failed to delete row: %v", err)
+	}
+
+	return nil
+}
+
+func (db *RDBMS) Close() error {
+	return WriteToFile("data.info", db.Tables)
 }
