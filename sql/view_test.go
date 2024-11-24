@@ -131,3 +131,27 @@ func TestView1(t *testing.T) {
 	assert.Nil(t, err)
 	db.ViewAllTables()
 }
+func TestView2(t *testing.T) {
+	// Initialize RDBMS
+	db, err := NewRDBMS()
+	assert.Nil(t, err)
+
+	// db.SelectAndDisplay("orders", []string{"*"}, "*")
+	// db.ViewAllTables()
+	err = db.SelectAndDisplay("orders", []string{"*"})
+	t.Log(err)
+	err = db.SelectWhereAndDisplay("orders", []string{"*"}, map[string]Condition{
+		"user_id": {Operator: "<=", Value: []byte("1")},
+	})
+	t.Log(err)
+	err = db.SelectWhereAndDisplay("orders", []string{"*"}, map[string]Condition{
+		"amount":  {Operator: "<=", Value: []byte("260")},
+		"user_id": {Operator: "<=", Value: []byte("1")},
+	})
+	t.Log(err)
+	// t.Log(ans, err)
+	// err = db.SelectAndWhereDisplay("orders", []string{"*"}, map[string]Condition{
+	// 	"user_id": {Operator: ">=", Value: []byte("1")},
+	// })
+	// t.Log(ans, err)
+}

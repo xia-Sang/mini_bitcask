@@ -33,6 +33,8 @@ func TestGenericCompareValues(t *testing.T) {
 	assert.True(t, result)
 
 	// Invalid comparison
+	// 这样并不优雅
 	result, err = CompareValues(FieldTypeInt, []byte("abc"), []byte("123"), ">")
 	assert.NotNil(t, err)
+	t.Log(result, err)
 }

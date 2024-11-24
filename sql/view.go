@@ -111,33 +111,41 @@ func (db *RDBMS) ViewAllTables() error {
 	return nil
 }
 
-// FormatResults formats the query results into a tabular string based on the given column order.
-func FormatResults(results []map[string][]byte, columns []string) (string, error) {
+// DisplayResults formats and displays query results as a table.
+func DisplayResults(columns []string, results []map[string][]byte) error {
 	if len(results) == 0 {
-		return "No results found.", nil
+		fmt.Println("No results found.")
+		return nil
 	}
 
-	// Initialize a buffer and tab writer for formatting
+	// Validate that the columns are not empty
+	if len(columns) == 0 {
+		return fmt.Errorf("no columns provided for display")
+	}
+	fmt.Println("Result found:")
+	// Set up a tab writer for output
 	var buffer bytes.Buffer
 	writer := tabwriter.NewWriter(&buffer, 0, 0, 2, ' ', tabwriter.Debug)
 
-	// Write the column headers
+	// Write column headers
 	fmt.Fprintln(writer, strings.Join(columns, "\t"))
 
-	// Write each row, respecting the column order
+	// Write rows
 	for _, row := range results {
 		var line []string
 		for _, col := range columns {
-			if value, exists := row[col]; exists {
-				line = append(line, string(value)) // Convert value to string for output
+			val, ok := row[col]
+			if ok {
+				line = append(line, string(val)) // Convert []byte to string
 			} else {
-				line = append(line, "") // Handle missing columns gracefully
+				line = append(line, "") // If column value is missing, add empty string
 			}
 		}
 		fmt.Fprintln(writer, strings.Join(line, "\t"))
 	}
 
-	// Flush the writer to the buffer
+	// Flush the buffer and display the output
 	writer.Flush()
-	return buffer.String(), nil
+	fmt.Println(buffer.String())
+	return nil
 }

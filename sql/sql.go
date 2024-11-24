@@ -4,11 +4,8 @@ import (
 	"bitcask/bitcask"
 	"bitcask/conf"
 	"bitcask/utils"
-	"bytes"
 	"fmt"
-	"strings"
 	"sync"
-	"text/tabwriter"
 )
 
 type KVStore interface {
@@ -21,7 +18,7 @@ type KVStore interface {
 type RDBMS struct {
 	Store  KVStore                 // Bitcask 底层存储
 	Tables map[string]*TableSchema // 表定义存储
-	mu     sync.RWMutex            //并发操作
+	mu     sync.RWMutex            // 并发操作
 }
 
 func NewRDBMS() (*RDBMS, error) {
@@ -205,72 +202,6 @@ func (db *RDBMS) validateFields(tableName string, data map[string][]byte) error 
 	return nil
 }
 
-// Select retrieves rows from the specified table where the given column matches the specified value.
-// It supports selecting specific columns or all columns (denoted by "*").
-func (db *RDBMS) Select(tableName string, columns []string, conditionColumn string, value []byte) ([]map[string][]byte, error) {
-	db.mu.RLock()
-
-	// Check if the table exists
-	table, exists := db.Tables[tableName]
-	if !exists {
-		db.mu.RUnlock()
-		return nil, fmt.Errorf("table %s does not exist", tableName)
-	}
-
-	// If columns are "*", select all columns
-	if len(columns) == 1 && columns[0] == "*" {
-		columns = make([]string, 0, len(table.Columns))
-		for col := range table.Columns {
-			columns = append(columns, col)
-		}
-	}
-
-	// Validate columns, including the condition column
-	columnSet := make(map[string]struct{})
-	for col := range table.Columns {
-		columnSet[col] = struct{}{}
-	}
-
-	for _, col := range append(columns, conditionColumn) {
-		if _, ok := columnSet[col]; !ok {
-			return nil, fmt.Errorf("column %s does not exist in table %s", col, tableName)
-		}
-	}
-
-	// Query the index for matching primary keys
-	indexPrefix := append([]byte("index:"+tableName+":"+conditionColumn+":"), value...)
-	primaryKeys, err := db.Store.Get(indexPrefix)
-	if err != nil || len(primaryKeys) == 0 {
-		db.mu.RUnlock()
-		return nil, fmt.Errorf("no matching rows found for condition column %s in table %s", conditionColumn, tableName)
-	}
-
-	// Fetch rows based on the primary keys
-	var results []map[string][]byte
-	primaryKeySize := len(primaryKeys) / len(value) // Determine primary key size
-
-	db.mu.RUnlock()
-	for i := 0; i < len(primaryKeys); i += primaryKeySize {
-		primaryKey := primaryKeys[i : i+primaryKeySize]
-		row, err := db.QueryByPrimaryKey(tableName, primaryKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query row for primary key %s: %v", primaryKey, err)
-		}
-
-		// Filter the row to include only the requested columns
-		selectedRow := make(map[string][]byte)
-		for _, col := range columns {
-			if val, ok := row[col]; ok {
-				selectedRow[col] = val
-			}
-		}
-
-		results = append(results, selectedRow)
-	}
-
-	return results, nil
-}
-
 // QueryByPrimaryKey retrieves a row by its primary key from the specified table.
 func (db *RDBMS) QueryByPrimaryKey(tableName string, primaryKey []byte) (map[string][]byte, error) {
 	db.mu.RLock()
@@ -305,40 +236,41 @@ func (db *RDBMS) QueryByPrimaryKey(tableName string, primaryKey []byte) (map[str
 	return rowData, nil
 }
 
-// SelectAndDisplay retrieves rows from the specified table, matches the condition, and displays formatted output.
-func (db *RDBMS) SelectAndDisplay(tableName string, columns []string, conditionColumn string, value []byte) error {
-	// Reuse Select logic
-	results, err := db.Select(tableName, columns, conditionColumn, value)
-	if err != nil {
-		return err
-	}
+// // SelectAndDisplay retrieves rows from the specified table, matches the condition, and displays formatted output.
+// func (db *RDBMS) SelectAndDisplay(tableName string, columns []string, conditionColumn string, value []byte) error {
+// 	// Reuse Select logic
+// 	results, err := db.Select(tableName, columns, conditionColumn, value)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	if len(results) == 0 {
-		fmt.Println("No results found.")
-		return nil
-	}
+// 	if len(results) == 0 {
+// 		fmt.Println("No results found.")
+// 		return nil
+// 	}
 
-	// Set up a tab writer for output
-	var buffer bytes.Buffer
-	writer := tabwriter.NewWriter(&buffer, 0, 0, 2, ' ', tabwriter.Debug)
+// 	fmt.Println("Select data:")
+// 	// Set up a tab writer for output
+// 	var buffer bytes.Buffer
+// 	writer := tabwriter.NewWriter(&buffer, 0, 0, 2, ' ', tabwriter.Debug)
 
-	// Write column headers
-	fmt.Fprintln(writer, strings.Join(columns, "\t"))
+// 	// Write column headers
+// 	fmt.Fprintln(writer, strings.Join(columns, "\t"))
 
-	// Write rows
-	for _, row := range results {
-		var line []string
-		for _, col := range columns {
-			line = append(line, string(row[col])) // Convert []byte to string
-		}
-		fmt.Fprintln(writer, strings.Join(line, "\t"))
-	}
+// 	// Write rows
+// 	for _, row := range results {
+// 		var line []string
+// 		for _, col := range columns {
+// 			line = append(line, string(row[col])) // Convert []byte to string
+// 		}
+// 		fmt.Fprintln(writer, strings.Join(line, "\t"))
+// 	}
 
-	// Flush and display the output
-	writer.Flush()
-	fmt.Println(buffer.String())
-	return nil
-}
+// 	// Flush and display the output
+// 	writer.Flush()
+// 	fmt.Println(buffer.String())
+// 	return nil
+// }
 
 // Delete removes a row from the specified table and its associated indexes.
 func (db *RDBMS) Delete(tableName string, primaryKey []byte) error {

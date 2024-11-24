@@ -21,8 +21,17 @@ type TableSchema struct {
 	Indexes []string             `json:"indexes"`
 }
 
+// 需要改进的部分 以实现按照原本的存储开始
+// type TableSchema struct {
+// 	Name       string         `json:"name"`
+// 	colMaps    map[string]int //存储columns名称与columns位置的对应关系
+// 	Indexes    []string       `json:"indexes"`
+// 	Columns    []string       `json:"columns"`
+// 	FieldTypes []string       `json:"fieldTypes"`
+// }
+
 // FieldType represents the type of a field in a table schema
-type FieldType = byte
+type FieldType byte
 
 // Supported field types
 const (
