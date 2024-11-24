@@ -1,56 +1,81 @@
 package parse
 
 import (
-	"fmt"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestParse(t *testing.T) {
-	// 示例 SQL 语句
-	sqlInsert := "INSERT INTO users (id, name) VALUES (1, 'Alice')"
+	sql := "INSERT INTO my_table (id, name, balance, birthdate) VALUES (3, 'sang', 112.50, '19000401')"
+	s := NewScanner()
+	s.buffer = []byte(sql)
+	s.length = len([]byte(sql))
 
-	fmt.Println("Parsing INSERT:")
-	parseSQL(sqlInsert)
+	ast, err := s.ParseInsert()
+	t.Log(ast)
+	t.Log(err)
+}
+func TestParse1(t *testing.T) {
+	sql := "SELECT  * FROM my_table where name = 'xia' "
+	s := NewScanner()
+	s.buffer = []byte(sql)
+	s.length = len([]byte(sql))
 
-	sqlSelect := "SELECT (id, name) FROM users WHERE id = 1"
+	ast, err := s.ParseSelect()
+	t.Log(ast)
+	t.Log(err)
+}
+func TestParse4(t *testing.T) {
+	sql := "SELECT (name,id,user) FROM my_table where name = 'xia' "
+	// sql := "SELECT * FROM my_table where name = 'xia' "
+	s := NewScanner()
+	s.buffer = []byte(sql)
+	s.length = len([]byte(sql))
 
-	fmt.Println("\nParsing SELECT:")
-	parseSQL(sqlSelect)
-
-	sql1 := "INSERT INTO my_table (id, name, balance, birthdate) VALUES (3, 'sang', 112.50, '19000401')"
-
-	fmt.Println("\nParsing insert:")
-	parseSQL(sql1)
-	sql2 := "SELECT  * FROM my_table where name = 'xia' "
-	parseSQL(sql2)
-	sql3 := "SELECT (name,id,user) FROM my_table where name = 'xia' "
-	parseSQL(sql3)
+	ast, err := s.ParseSelect()
+	t.Log(ast)
+	t.Log(err)
 }
 
-// TestParse 封装解析 SQL 测试
-func TestParse1(t *testing.T) {
-	// 示例 SQL 语句
-	sqlInsert := "INSERT INTO users (id, name) VALUES (1, 'Alice')"
-	fmt.Println("Parsing INSERT:")
-	parseSQL(sqlInsert)
-
-	sqlSelect := "SELECT id, name FROM users WHERE id = 1"
-	fmt.Println("\nParsing SELECT:")
-	parseSQL(sqlSelect)
-
-	sqlDelete := "DELETE FROM users WHERE name = 'Alice'"
-	fmt.Println("\nParsing DELETE:")
-	parseSQL(sqlDelete)
-
-	sql1 := "INSERT INTO my_table (id, name, balance, birthdate) VALUES (3, 'sang', 112.50, '19000401')"
-	fmt.Println("\nParsing INSERT:")
-	parseSQL(sql1)
-
-	sql2 := "SELECT * FROM my_table WHERE name = 'xia'"
-	fmt.Println("\nParsing SELECT:")
-	parseSQL(sql2)
-
-	sql3 := "DELETE FROM my_table WHERE balance > 1000"
-	fmt.Println("\nParsing DELETE:")
-	parseSQL(sql3)
+func TestParse2(t *testing.T) {
+	// sql := `CREATE TABLE mytable (id INT PRIMARY KEY, name VARCHAR)`
+	// sql := `CREATE TABLE mytable (id INT(11) PRIMARY KEY,age VARCHAR,name VARCHAR 255,balance DECIMAL)`
+	// 	sql :=
+	// 		`CREATE TABLE users (
+	//     id INT AUTO_INCREMENT PRIMARY KEY,
+	//     username VARCHAR(50) NOT NULL,
+	//     email VARCHAR(100) NOT NULL,
+	//     birthdate DATE,
+	//     is_active BOOLEAN DEFAULT TRUE
+	// )`
+	// 	sql := `CREATE TABLE Persons
+	// (
+	// PersonID int,
+	// LastName varchar(255),
+	// FirstName varchar(255),
+	// Address varchar(255),
+	// City varchar(255)
+	// )`
+	// 	sql :=
+	// 		`CREATE TABLE Person
+	// (
+	// LastName varchar,
+	// FirstName varchar,
+	// Address varchar,
+	// Age int
+	// ) `
+	sql := `CREATE TABLE users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    birthdate DATE,
+    is_active BOOLEAN DEFAULT TRUE
+)`
+	s := NewScannerFromString(sql)
+	s.buffer = []byte(sql)
+	s.length = len([]byte(sql))
+	ast, err := s.ParseCreate()
+	assert.Nil(t, err)
+	t.Log(ast)
 }
