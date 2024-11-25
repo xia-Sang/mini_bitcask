@@ -8,7 +8,6 @@ import (
 	"text/tabwriter"
 )
 
-// View displays the data of the specified table in a tabular format.
 func (db *RDBMS) View(tableName string) error {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -26,11 +25,8 @@ func (db *RDBMS) View(tableName string) error {
 		return fmt.Errorf("failed to retrieve rows for table %s: %v", tableName, err)
 	}
 
-	// Prepare table headers from the schema
-	headers := make([]string, 0, len(table.Columns))
-	for col := range table.Columns {
-		headers = append(headers, col)
-	}
+	// Prepare table headers from the schema (directly use Columns)
+	headers := table.Columns
 
 	// Use a bytes.Buffer to construct the tabular output
 	var buffer bytes.Buffer
@@ -51,7 +47,11 @@ func (db *RDBMS) View(tableName string) error {
 		// Extract data for each column in order
 		row := make([]string, len(headers))
 		for i, column := range headers {
-			row[i] = string(rowData[column]) // Convert to string for display
+			if val, ok := rowData[column]; ok {
+				row[i] = string(val) // Convert to string for display
+			} else {
+				row[i] = "NULL" // Handle missing data gracefully
+			}
 		}
 
 		// Write the row to the tabular output

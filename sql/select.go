@@ -15,16 +15,12 @@ func (db *RDBMS) preprocessColumns(tableName string, columns []string) ([]string
 
 	// Resolve "*" to all columns
 	if len(columns) == 1 && columns[0] == "*" {
-		allColumns := make([]string, 0, len(table.Columns))
-		for col := range table.Columns {
-			allColumns = append(allColumns, col)
-		}
-		return allColumns, nil
+		return append([]string{}, table.Columns...), nil // Return a copy of all columns
 	}
 
 	// Validate requested columns
 	for _, col := range columns {
-		if _, ok := table.Columns[col]; !ok {
+		if _, ok := table.colMaps[col]; !ok {
 			return nil, fmt.Errorf("column %s does not exist in table %s", col, tableName)
 		}
 	}
@@ -34,7 +30,11 @@ func (db *RDBMS) preprocessColumns(tableName string, columns []string) ([]string
 
 // fetchAndFilterRows retrieves all rows for a table and filters them based on the provided columns and conditions.
 func (db *RDBMS) fetchAndFilterRows(tableName string, columns []string, conditions map[string]Condition) ([]map[string][]byte, error) {
-	table := db.Tables[tableName] // Assume existence checked before calling
+	// Ensure the table exists
+	table, exists := db.Tables[tableName]
+	if !exists {
+		return nil, fmt.Errorf("table %s does not exist", tableName)
+	}
 
 	// Fetch all rows for the table
 	prefix := []byte(tableName + ":")
@@ -45,6 +45,7 @@ func (db *RDBMS) fetchAndFilterRows(tableName string, columns []string, conditio
 
 	var results []map[string][]byte
 
+	// Iterate over all retrieved rows
 	for _, value := range rows {
 		// Deserialize the row
 		row, err := utils.DeserializeRow(value)
@@ -56,7 +57,11 @@ func (db *RDBMS) fetchAndFilterRows(tableName string, columns []string, conditio
 		if conditions != nil {
 			match := true
 			for condCol, cond := range conditions {
-				fieldType := table.Columns[condCol]
+				fieldIndex, ok := table.colMaps[condCol] // Use colMaps for column validation
+				if !ok {
+					return nil, fmt.Errorf("condition column %s does not exist in table %s", condCol, tableName)
+				}
+				fieldType := table.FieldTypes[fieldIndex]
 				cellValue, exists := row[condCol]
 				if !exists {
 					match = false
@@ -76,6 +81,9 @@ func (db *RDBMS) fetchAndFilterRows(tableName string, columns []string, conditio
 		// Filter the row to include only the requested columns
 		filteredRow := make(map[string][]byte)
 		for _, col := range columns {
+			if _, ok := table.colMaps[col]; !ok {
+				return nil, fmt.Errorf("requested column %s does not exist in table %s", col, tableName)
+			}
 			if val, ok := row[col]; ok {
 				filteredRow[col] = val
 			}

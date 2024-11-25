@@ -1,0 +1,1 @@
+{"orders":{"name":"orders","columns_type":"AQED","columns":["order_id","user_id","amount"]},"users":{"name":"users","columns_type":"AQAA","columns":["id","name","email"]}}

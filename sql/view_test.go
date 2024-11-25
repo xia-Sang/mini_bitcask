@@ -13,14 +13,14 @@ func TestView(t *testing.T) {
 	defer db.Close()
 
 	// Create tables
-	err = db.CreateTable("users", map[string]FieldType{
+	err = db.CreateTableByMap("users", map[string]FieldType{
 		"id":    FieldTypeInt,
 		"name":  FieldTypeString,
 		"email": FieldTypeString,
 	})
 	assert.Nil(t, err, "CreateTable for 'users' failed")
 
-	err = db.CreateTable("orders", map[string]FieldType{
+	err = db.CreateTableByMap("orders", map[string]FieldType{
 		"order_id": FieldTypeInt,
 		"user_id":  FieldTypeInt,
 		"amount":   FieldTypeFloat,
@@ -149,9 +149,5 @@ func TestView2(t *testing.T) {
 		"user_id": {Operator: "<=", Value: []byte("1")},
 	})
 	t.Log(err)
-	// t.Log(ans, err)
-	// err = db.SelectAndWhereDisplay("orders", []string{"*"}, map[string]Condition{
-	// 	"user_id": {Operator: ">=", Value: []byte("1")},
-	// })
-	// t.Log(ans, err)
+
 }

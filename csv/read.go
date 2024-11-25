@@ -68,7 +68,7 @@ func ToMySql(filename string) (*sql.RDBMS, error) {
 	}
 	defer mySql.Close()
 
-	columnTypes, err := inferColumnTypesFromBytes(headers, rows)
+	col, colTypes, err := inferColumnTypesFromBytes(headers, rows)
 	if err != nil {
 		return nil, fmt.Errorf("failed to infer column types: %v", err)
 	}
@@ -77,7 +77,7 @@ func ToMySql(filename string) (*sql.RDBMS, error) {
 	tableName := getTableName(filename)
 
 	// Create the table
-	if err := mySql.CreateTable(tableName, columnTypes); err != nil {
+	if err := mySql.CreateTable(tableName, col, colTypes); err != nil {
 		return nil, fmt.Errorf("failed to create table %s: %v", tableName, err)
 	}
 
@@ -97,28 +97,35 @@ func ToMySql(filename string) (*sql.RDBMS, error) {
 }
 
 // inferColumnTypesFromBytes infers column types based on CSV headers and rows.
-func inferColumnTypesFromBytes(headers [][]byte, rows [][][]byte) (map[string]sql.FieldType, error) {
+func inferColumnTypesFromBytes(headers [][]byte, rows [][][]byte) ([]string, []sql.FieldType, error) {
 	if len(headers) == 0 || len(rows) == 0 {
-		return nil, fmt.Errorf("cannot infer column types from empty headers or rows")
+		return nil, nil, fmt.Errorf("cannot infer column types from empty headers or rows")
 	}
 
-	columnTypes := make(map[string]sql.FieldType)
+	columnNames := make([]string, len(headers))
+	columnTypes := make([]sql.FieldType, len(headers))
+
+	// Initialize defaults
 	for i, header := range headers {
-		columnTypes[string(header)] = sql.FieldTypeString // Default to string
-		for _, row := range rows {
-			if i < len(row) {
-				value := row[i]
-				if _, err := strconv.Atoi(string(value)); err == nil {
-					columnTypes[string(header)] = sql.FieldTypeInt
-				} else if _, err := strconv.ParseFloat(string(value), 64); err == nil {
-					columnTypes[string(header)] = sql.FieldTypeFloat
-				} else if string(value) == "true" || string(value) == "false" {
-					columnTypes[string(header)] = sql.FieldTypeBool
-				}
+		columnNames[i] = string(header)
+		columnTypes[i] = sql.FieldTypeString // Default to string
+	}
+
+	// Infer column types based on row values
+	for _, row := range rows {
+		for i := 0; i < len(headers) && i < len(row); i++ {
+			value := row[i]
+			if _, err := strconv.Atoi(string(value)); err == nil {
+				columnTypes[i] = sql.FieldTypeInt
+			} else if _, err := strconv.ParseFloat(string(value), 64); err == nil {
+				columnTypes[i] = sql.FieldTypeFloat
+			} else if string(value) == "true" || string(value) == "false" {
+				columnTypes[i] = sql.FieldTypeBool
 			}
 		}
 	}
-	return columnTypes, nil
+
+	return columnNames, columnTypes, nil
 }
 
 // ToMySql reads a CSV file, infers or uses provided column types, creates a table, and populates it with rows.

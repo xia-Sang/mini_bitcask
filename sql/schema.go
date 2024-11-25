@@ -1,34 +1,25 @@
 package sql
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// 字段定义 目前不添加任何限制条件
+// Field defines the structure of a column
 type Field struct {
-	Name string
-	Type FieldType // 字段类型，例如 "string", "int", "bytes"
+	Name string    `json:"name"` // Column name
+	Type FieldType `json:"type"` // Column data type
 }
 
-// table schema
+// TableSchema defines the structure of a table
 type TableSchema struct {
-	Name    string               `json:"name"`
-	Columns map[string]FieldType `json:"columns"` // Column names and their types
-	Indexes []string             `json:"indexes"`
+	Name       string         `json:"name"`         // Table name
+	FieldTypes []FieldType    `json:"columns_type"` // Field types corresponding to columns
+	Columns    []string       `json:"columns"`      // List of column names
+	colMaps    map[string]int // Column name to position mapping (not serialized)
 }
-
-// 需要改进的部分 以实现按照原本的存储开始
-// type TableSchema struct {
-// 	Name       string         `json:"name"`
-// 	colMaps    map[string]int //存储columns名称与columns位置的对应关系
-// 	Indexes    []string       `json:"indexes"`
-// 	Columns    []string       `json:"columns"`
-// 	FieldTypes []string       `json:"fieldTypes"`
-// }
 
 // FieldType represents the type of a field in a table schema
 type FieldType byte
@@ -103,58 +94,21 @@ func validateFieldType(fieldType FieldType, value []byte) error {
 	return nil
 }
 
-// MarshalJSON converts numeric FieldType to string representations for JSON serialization.
-func (ts TableSchema) MarshalJSON() ([]byte, error) {
-	columns := make(map[string]string)
-	for colName, fieldType := range ts.Columns {
-		typeName, ok := FieldTypeNames[fieldType]
-		if !ok {
-			return nil, fmt.Errorf("unsupported FieldType: %d", fieldType)
-		}
-		columns[colName] = typeName
+// GetColumnPosition retrieves the position of a column by name
+func (t *TableSchema) getColumnPosition(columnName string) (int, error) {
+	pos, exists := t.colMaps[columnName]
+	if !exists {
+		return -1, fmt.Errorf("column %s does not exist in table %s", columnName, t.Name)
 	}
-
-	// Alias the TableSchema to avoid infinite recursion during Marshal
-	type Alias TableSchema
-	return json.Marshal(&struct {
-		Columns map[string]string `json:"columns"`
-		*Alias
-	}{
-		Columns: columns,
-		Alias:   (*Alias)(&ts),
-	})
+	return pos, nil
 }
 
-// UnmarshalJSON converts string FieldType representations to numeric FieldType for JSON deserialization.
-func (ts *TableSchema) UnmarshalJSON(data []byte) error {
-	// Alias the TableSchema to avoid infinite recursion during Unmarshal
-	type Alias TableSchema
-	aux := &struct {
-		Columns map[string]string `json:"columns"`
-		*Alias
-	}{
-		Alias: (*Alias)(ts),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return fmt.Errorf("failed to unmarshal TableSchema: %v", err)
-	}
-
-	// Convert string field types back to numeric FieldType
-	ts.Columns = make(map[string]FieldType)
-	for colName, typeName := range aux.Columns {
-		var found bool
-		for key, val := range FieldTypeNames {
-			if val == typeName {
-				ts.Columns[colName] = key
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("invalid FieldType name: %s", typeName)
+// resolveFieldType resolves a string field type name to its numeric FieldType value.
+func resolveFieldType(typeName string) (FieldType, bool) {
+	for fieldType, name := range FieldTypeNames {
+		if name == typeName {
+			return fieldType, true
 		}
 	}
-
-	return nil
+	return 0, false
 }
