@@ -66,6 +66,40 @@ func TestReadToDb3(t *testing.T) {
 func TestReadToDb4(t *testing.T) {
 	fileName := "../test/test.csv"
 	db, err := ToMySql(fileName)
+	tableName := getTableName(fileName)
 	t.Log(err)
-	db.ToCSV(getTableName(fileName), "test1.csv")
+	rowData := []map[string][]byte{
+		{
+			"id":        []byte("1"),
+			"name":      []byte("Alice"),
+			"age":       []byte("30"),
+			"email":     []byte("alice@example.com"),
+			"is_active": []byte("true"),
+		},
+		{
+			"id":        []byte("2"),
+			"name":      []byte("Bob"),
+			"age":       []byte("25"),
+			"email":     []byte("bob@example.com"),
+			"is_active": []byte("false"),
+		},
+		{
+			"id":        []byte("3"),
+			"name":      []byte("Charlie"),
+			"age":       []byte("35"),
+			"email":     []byte("charlie@example.com"),
+			"is_active": []byte("true"),
+		},
+		{
+			"id":        []byte("4"),
+			"name":      []byte("Daisy"),
+			"age":       []byte("28"),
+			"email":     []byte("daisy@example.com"),
+			"is_active": []byte("false"),
+		},
+	}
+
+	db.Insert(tableName, []byte("4"), rowData[0])
+	db.Insert(tableName, []byte("4"), rowData[3])
+	db.ToCSV(tableName, "test1.csv")
 }
