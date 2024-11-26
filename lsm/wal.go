@@ -51,6 +51,8 @@ func (wal *WAL) AppendPut(record *Record) error {
 	wal.Offset += uint32(length)
 	return err
 }
+
+// Recover replays the WAL to restore the memtable state.
 func (wal *WAL) Recover(memtable *Memtable) error {
 	offset := int64(0)
 
@@ -60,65 +62,57 @@ func (wal *WAL) Recover(memtable *Memtable) error {
 		return fmt.Errorf("failed to get file size: %w", err)
 	}
 
+	// Loop through the WAL file until we reach the end
 	for offset < fileSize {
 		startOffset := offset // Save the starting offset for this record
 
-		// Step 1: Read fixed-size header (1 byte recordType, 4 bytes keyLength, 4 bytes valueLength)
-		header := make([]byte, 9) // 1 + 4 + 4 = 9
-		if _, err := wal.fileHandler.ReadAt(offset, header); err != nil {
-			return fmt.Errorf("failed to read record header: %w", err)
+		// Step 1: Read the fixed-size header (1 byte recordType, 4 bytes keyLength, 4 bytes valueLength)
+		header, err := wal.fileHandler.ReadAt(offset, 9) // 9 bytes header
+		if err != nil {
+			return fmt.Errorf("failed to read record header at offset %d: %w", offset, err)
 		}
 		offset += int64(len(header))
 
+		// Extract the recordType, keyLength, and valueLength from the header
 		recordType := recordType(header[0])
 		keyLength := binary.BigEndian.Uint32(header[1:5])
 		valueLength := binary.BigEndian.Uint32(header[5:9])
 
-		// Validate the recordType
-		if recordType != recordSet && recordType != recordDelete {
-			return fmt.Errorf("invalid record type %d at offset %d", recordType, startOffset)
+		// Step 2: Read key and value + CRC32 in a single read
+		recordSize := int(keyLength + valueLength + 4) // keyLength + valueLength + 4 bytes for CRC32
+		recordData, err := wal.fileHandler.ReadAt(offset, recordSize)
+		if err != nil {
+			return fmt.Errorf("failed to read record data at offset %d: %w", offset, err)
 		}
+		offset += int64(len(recordData))
 
-		// 如果type=
-		// Step 2: Read key
-		key := make([]byte, keyLength)
-		if _, err := wal.fileHandler.ReadAt(offset, key); err != nil {
-			return fmt.Errorf("failed to read key at offset %d: %w", offset, err)
-		}
-		offset += int64(len(key))
-
-		// Step 3: Read value (only if valueLength > 0)
+		// Extract key and value from the recordData
+		key := recordData[:keyLength]
 		var value []byte
-		if valueLength > 0 {
-			value = make([]byte, valueLength)
-			if _, err := wal.fileHandler.ReadAt(offset, value); err != nil {
-				return fmt.Errorf("failed to read value at offset %d: %w", offset, err)
-			}
-			offset += int64(len(value))
+		if recordType == recordSet {
+			value = recordData[keyLength : keyLength+valueLength]
 		}
 
-		// Step 4: Read CRC32 (4 bytes)
-		crcBytes := make([]byte, 4)
-		if _, err := wal.fileHandler.ReadAt(offset, crcBytes); err != nil {
-			return fmt.Errorf("failed to read CRC32 at offset %d: %w", offset, err)
-		}
-		offset += int64(len(crcBytes))
-		expectedCRC := binary.BigEndian.Uint32(crcBytes)
+		// Read CRC32 from the last 4 bytes
+		expectedCRC := binary.BigEndian.Uint32(recordData[len(recordData)-4:])
 
-		// Step 5: Calculate and verify CRC32
+		// Step 3: Calculate and verify CRC32
 		var buffer bytes.Buffer
-		buffer.WriteByte(byte(recordType))
-		binary.Write(&buffer, binary.BigEndian, keyLength)
-		binary.Write(&buffer, binary.BigEndian, valueLength)
-		buffer.Write(key)
-		buffer.Write(value)
+		buffer.WriteByte(byte(recordType))                   // Write recordType
+		binary.Write(&buffer, binary.BigEndian, keyLength)   // Write keyLength
+		binary.Write(&buffer, binary.BigEndian, valueLength) // Write valueLength
+		buffer.Write(key)                                    // Write key
+		if recordType == recordSet {
+			buffer.Write(value) // Write value if it's a recordSet
+		}
 
+		// Calculate CRC32 over the buffer (without the last 4 bytes, since that's CRC)
 		calculatedCRC := crc32.ChecksumIEEE(buffer.Bytes())
 		if calculatedCRC != expectedCRC {
 			return fmt.Errorf("CRC32 mismatch at offset %d: expected %d, got %d", startOffset, expectedCRC, calculatedCRC)
 		}
 
-		// Step 6: Update memtable based on record type
+		// Step 4: Update the memtable based on the record type
 		if recordType == recordSet {
 			memtable.Put(key, value)
 		} else if recordType == recordDelete {
@@ -133,12 +127,20 @@ func (wal *WAL) Recover(memtable *Memtable) error {
 
 // readRecord reads a record from the WAL at the given offset and known length.
 func (wal *WAL) readRecord(offset, length uint32) (*Record, error) {
-	// Step 1: Read the entire record data
+	// Step 1: Read the raw data from the file at the specified offset and length
 	data, err := wal.fileHandler.ReadAt(int64(offset), int(length))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read record at offset %d: %w", offset, err)
 	}
 
+	// Step 2: Parse the raw data into a Record using the ReadRecord function
+	record, err := ReadRecord(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read record at offset %d: %w", offset, err)
+	}
+
+	// Step 3: Return the parsed record
+	return record, nil
 }
 
 // Write writes data to the WAL

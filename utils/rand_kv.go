@@ -7,7 +7,7 @@ import (
 )
 
 // generateKeys generates a list of random keys based on the specified parameters
-func generateKeys(prefix []byte, split []byte, splitCount int, count int) [][]byte {
+func GenerateKeys(prefix []byte, split []byte, splitCount int, count int) [][]byte {
 	rand.Seed(time.Now().UnixNano()) // Seed the random number generator
 
 	var result [][]byte
